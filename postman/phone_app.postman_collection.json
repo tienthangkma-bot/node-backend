@@ -1,0 +1,185 @@
+{
+  "info": {
+    "_postman_id": "phone-app-collection-0001",
+    "name": "Phone App API - Full Test",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Collection to test the full API: taikhoan, sanpham, nhomsanpham, dathang, chitietdonhang, danhgia. Replace {{base_url}} in environment with your server (e.g. http://localhost:3000)."
+  },
+  "item": [
+    {
+      "name": "Auth - Login",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"admin123\"\n}"
+        },
+        "url": "{{base_url}}/taikhoan/login"
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "// Save JWT token to environment variable 'token'",
+              "if (pm.response.code === 200) {",
+              "  const json = pm.response.json();",
+              "  if (json && json.token) { pm.environment.set('token', json.token); }",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Taikhoan - Register",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"username\": \"user\",\n  \"password\": \"user123\"\n}" },
+        "url": "{{base_url}}/taikhoan/register"
+      }
+    },
+    {
+      "name": "Taikhoan - All",
+      "request": { "method": "GET", "header": [], "url": "{{base_url}}/taikhoan/all" }
+    },
+    {
+      "name": "Taikhoan - Userinfo (requires token)",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+        "url": "{{base_url}}/taikhoan/userinfo"
+      }
+    },
+    {
+      "name": "Sanpham - Create",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"tensp\": \"Phone X\",\n  \"mota\": \"Điện thoại mẫu\",\n  \"ghichu\": \"Test\",\n  \"dongia\": 1000.0,\n  \"soluong\": 5,\n  \"maso\": 1,\n  \"anh\": \"/uploads/phones/phonex.jpg\"\n}"
+        },
+        "url": "{{base_url}}/sanpham"
+      }
+    },
+    {
+      "name": "Sanpham - All",
+      "request": { "method": "GET", "header": [], "url": "{{base_url}}/sanpham/all" }
+    },
+    {
+      "name": "Sanpham - Search",
+      "request": { "method": "GET", "header": [], "url": "{{base_url}}/sanpham/search?name=Phone" }
+    },
+    {
+      "name": "Sanpham - By Group",
+      "request": { "method": "GET", "header": [], "url": "{{base_url}}/sanpham/group/1" }
+    },
+    {
+      "name": "Sanpham - Random",
+      "request": { "method": "GET", "header": [], "url": "{{base_url}}/sanpham/random?limit=4" }
+    },
+    {
+      "name": "Sanpham - Get by masp",
+      "request": { "method": "GET", "header": [], "url": "{{base_url}}/sanpham/1" }
+    },
+    {
+      "name": "Sanpham - Update",
+      "request": {
+        "method": "PUT",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"tensp\": \"Phone X Updated\",\n  \"dongia\": 1200.0,\n  \"mota\": \"Updated\",\n  \"ghichu\": \"\",\n  \"soluongkho\": 3,\n  \"maso\": 1,\n  \"anh\": \"/uploads/phones/phonex_v2.jpg\"\n}" },
+        "url": "{{base_url}}/sanpham/1"
+      }
+    },
+    {
+      "name": "Sanpham - Delete",
+      "request": { "method": "DELETE", "header": [], "url": "{{base_url}}/sanpham/1" }
+    },
+    {
+      "name": "Sanpham - Pic (returns path)",
+      "request": { "method": "GET", "header": [], "url": "{{base_url}}/sanpham/pic/1" }
+    },
+    {
+      "name": "Nhomsanpham - Create",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"tennsp\": \"Điện thoại\",\n  \"anh\": \"/uploads/groups/dienthoai.jpg\"\n}" },
+        "url": "{{base_url}}/nhomsanpham"
+      }
+    },
+    {
+      "name": "Nhomsanpham - All",
+      "request": { "method": "GET", "header": [], "url": "{{base_url}}/nhomsanpham/all" }
+    },
+    {
+      "name": "Nhomsanpham - Random",
+      "request": { "method": "GET", "header": [], "url": "{{base_url}}/nhomsanpham/random?limit=3" }
+    },
+    {
+      "name": "Nhomsanpham - Delete",
+      "request": { "method": "DELETE", "header": [], "url": "{{base_url}}/nhomsanpham/1" }
+    },
+    {
+      "name": "Dathang - Create",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"user_id\": 2,\n  \"tenkh\": \"Nguyen Van A\",\n  \"diachi\": \"HCM\",\n  \"sdt\": \"0987654321\",\n  \"tongthanhtoan\": 19900.0\n}" },
+        "url": "{{base_url}}/dathang"
+      }
+    },
+    {
+      "name": "Dathang - By User",
+      "request": { "method": "GET", "header": [], "url": "{{base_url}}/dathang/user/2" }
+    },
+    {
+      "name": "Dathang - All",
+      "request": { "method": "GET", "header": [], "url": "{{base_url}}/dathang/all" }
+    },
+    {
+      "name": "Chitietdonhang - Create",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"id_dathang\": 1,\n  \"masp\": 1,\n  \"soluong\": 1,\n  \"dongia\": 19900.0,\n  \"anh\": null\n}" },
+        "url": "{{base_url}}/chitietdathang"
+      }
+    },
+    {
+      "name": "Chitietdonhang - By Order",
+      "request": { "method": "GET", "header": [], "url": "{{base_url}}/chitietdathang/1" }
+    },
+    {
+      "name": "Danhgia - Check",
+      "request": { "method": "GET", "header": [], "url": "{{base_url}}/danhgia/check?user_id=2&masp=1&id_chitietdonhang=1" }
+    },
+    {
+      "name": "Danhgia - Create",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"user_id\": 2,\n  \"masp\": 1,\n  \"id_chitietdonhang\": 1,\n  \"rating\": 5,\n  \"comment\": \"Tốt\",\n  \"ngay\": \"2025-11-11T00:00:00Z\"\n}" },
+        "url": "{{base_url}}/danhgia"
+      }
+    },
+    {
+      "name": "Danhgia - Get By Order (lay)",
+      "request": { "method": "GET", "header": [], "url": "{{base_url}}/danhgia/lay?user_id=2&masp=1&id_chitietdonhang=1" }
+    },
+    {
+      "name": "Danhgia - By Product",
+      "request": { "method": "GET", "header": [], "url": "{{base_url}}/danhgia/sanpham/1" }
+    },
+    {
+      "name": "Danhgia - Avg",
+      "request": { "method": "GET", "header": [], "url": "{{base_url}}/danhgia/trungbinh?masp=1" }
+    }
+  ]
+}

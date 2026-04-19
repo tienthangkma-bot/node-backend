@@ -1,203 +1,175 @@
-// File: routes/taikhoanRoutes.js
-const express = require('express');
+require("dotenv").config();
+const express = require("express");
 const router = express.Router();
-const db = require('../db.js'); // Module db.js chứa connection đến MySQL
-const jwt = require('jsonwebtoken');
-const { verifyToken } = require('../middleware/auth');
-const SECRET_KEY = '123456'; 
-const bcrypt = require('bcrypt');
-const saltRounds = 10;
-router.post('/login', (req, res) => {
-    const { username, password } = req.body;
-    const sql = 'SELECT * FROM taikhoan WHERE tendn = ?';
+const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
+const nodemailer = require("nodemailer");
+const jwt = require("jsonwebtoken");
+const { verifyToken, isAdmin } = require("../middleware/auth");
 
-    db.query(sql, [username], async (err, result) => {
-        if (err) return res.status(500).json({ success: false, message: 'Lỗi server' });
+// Lấy Secret Key từ biến môi trường để bảo mật phiên làm việc
+const SECRET_KEY = process.env.JWT_SECRET;
 
-        if (result.length === 0) {
-            return res.json({ success: false, message: 'Sai tên đăng nhập hoặc mật khẩu' });
-        }
+// --- CẤU HÌNH SCHEMA ---
+const TaiKhoanSchema = new mongoose.Schema(
+  {
+    tendn: { type: String, required: true, unique: true },
+    matkhau: { type: String, required: true },
+    email: { type: String },
+    quyen: { type: String, default: "user" },
+    trangthai: { type: Number, default: 1 },
+  },
+  { versionKey: false }
+);
 
-        const user = result[0];
+const TaiKhoan =
+  mongoose.models.TaiKhoan || mongoose.model("TaiKhoan", TaiKhoanSchema);
 
-        if (user.trangthai === 0) {
-            return res.json({ success: false, message: 'Tài khoản đã bị khóa, vui lòng liên hệ Admin' });
-        }
-
-        const passwordMatch = await bcrypt.compare(password, user.matkhau);
-        if (!passwordMatch) {
-            return res.json({ success: false, message: 'Sai tên đăng nhập hoặc mật khẩu' });
-        }
-
-        const token = jwt.sign(
-            { user_id: user.id, username: user.tendn, role: user.quyen },
-            SECRET_KEY,
-            { expiresIn: '24h' }
-        );
-
-        res.json({
-            success: true,
-            message: 'Đăng nhập thành công',
-            token,
-            user_id: user.id,
-            username: user.tendn,
-            role: user.quyen
-        });
-    });
+// --- CẤU HÌNH MAIL OTP ---
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
 });
-router.get('/userinfo', verifyToken, (req, res) => {
+
+let otpStore = {};
+
+// --- 1. GỬI OTP ---
+router.post("/send-otp", async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.json({ success: false, message: "Thiếu Email" });
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  otpStore[email] = { otp, expires: Date.now() + 300000 };
+
+  const mailOptions = {
+    from: `"Thang Store Security" <${process.env.EMAIL_USER}>`,
+    to: email,
+    subject: "Mã xác thực đăng ký tài khoản",
+    text: `Mã OTP của bạn là: ${otp}.`,
+  };
+
+  transporter.sendMail(mailOptions, (err) => {
+    if (err) return res.json({ success: false, message: "Lỗi gửi mail" });
+    res.json({ success: true, message: "Mã OTP đã gửi về Email" });
+  });
+});
+
+// --- 2. ĐĂNG KÝ USER (Mã hóa lưu trữ) ---
+router.post("/register-verify", async (req, res) => {
+  const { username, password, email, otp } = req.body;
+  const stored = otpStore[email];
+
+  if (!stored || stored.otp !== otp || Date.now() > stored.expires) {
+    return res.json({ success: false, message: "OTP sai hoặc hết hạn" });
+  }
+
+  try {
+    // Mã hóa mật khẩu trước khi lưu xuống Database
+    const salt = await bcrypt.genSalt(12);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    const newUser = new TaiKhoan({
+      tendn: username,
+      matkhau: hashedPassword,
+      email: email,
+    });
+
+    await newUser.save();
+    delete otpStore[email];
+    res.json({ success: true, message: "Đăng ký thành công!" });
+  } catch (err) {
+    res.json({ success: false, message: "Tên đăng nhập đã tồn tại" });
+  }
+});
+
+// --- 3. ĐĂNG NHẬP (Bảo mật phiên JWT) ---
+router.post("/login", async (req, res) => {
+  const { username, password } = req.body;
+  try {
+    const user = await TaiKhoan.findOne({
+      $or: [{ tendn: username }, { email: username }],
+    });
+
+    if (!user)
+      return res.json({ success: false, message: "Tài khoản không tồn tại" });
+
+    // Kiểm tra mật khẩu bằng Bcrypt
+    const isMatch = await bcrypt.compare(password, user.matkhau);
+    if (!isMatch)
+      return res.json({ success: false, message: "Mật khẩu không chính xác" });
+
+    // Tạo JWT Token có chữ ký bảo mật và thời hạn
+    const token = jwt.sign(
+      { user_id: user._id, username: user.tendn, role: user.quyen },
+      SECRET_KEY,
+      { expiresIn: "24h" }
+    );
+
     res.json({
-        success: true,
-        message: 'Lấy thông tin thành công',
-        user: req.user // user_id, username, role
+      success: true,
+      user_id: user._id,
+      username: user.tendn,
+      role: user.quyen,
+      token: token,
     });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Lỗi hệ thống" });
+  }
 });
-router.post('/register', async (req, res) => {
-    const { username, password} = req.body;
-    if (!username || !password) return res.status(400).json({ success: false, message: 'Thiếu thông tin' });
 
-    const checkSql = 'SELECT * FROM taikhoan WHERE tendn = ?';
-    db.query(checkSql, [username], async (err, result) => {
-        if (err) return res.status(500).json({ success: false });
-
-        if (result.length > 0) {
-            return res.json({ success: false, message: 'Tài khoản đã tồn tại' });
-        }
-
-        const hashedPassword = await bcrypt.hash(password, saltRounds);
-        const insertSql = 'INSERT INTO taikhoan (tendn, matkhau, quyen) VALUES (?, ?, ?)';
-        db.query(insertSql, [username, hashedPassword, 'user'], (err2) => {
-            if (err2) return res.status(500).json({ success: false });
-            res.json({ success: true, message: 'Đăng ký thành công' });
-        });
-    });
+// --- 4. LẤY DANH SÁCH (Admin) ---
+router.get("/", verifyToken, isAdmin, async (req, res) => {
+  try {
+    const users = await TaiKhoan.find({}, "-matkhau"); // Chặn rò rỉ mật khẩu đã mã hóa
+    res.json(users);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
-router.get('/all', (req, res) => {
-    db.query('SELECT * FROM taikhoan', (err, result) => {
-        if (err) return res.status(500).json({ success: false });
-        res.json({ success: true, data: result });
-    });
-});
-router.post('/delete', (req, res) => {
-    const { username } = req.body;
-    db.query('DELETE FROM taikhoan WHERE tendn = ?', [username], (err, result) => {
-        if (err) return res.status(500).json({ success: false });
-        if (result.affectedRows === 0) return res.json({ success: false, message: 'Khong tim thay tai khoan' });
-        res.json({ success: true });
-    });
-});
-router.post('/update', (req, res) => {
-    const { username, password, role } = req.body;
-    db.query('UPDATE taikhoan SET matkhau = ?, quyen = ? WHERE tendn = ?', [password, role, username], (err, result) => {
-        if (err) return res.status(500).json({ success: false });
-        if (result.affectedRows === 0) return res.json({ success: false, message: 'Khong tim thay tai khoan' });
-        res.json({ success: true });
-    });
-});
-router.delete("/:tdn", (req, res) => {
-    const tdn = req.params.tdn;
 
-    const sql = "DELETE FROM taikhoan WHERE tendn = ?";
-    db.query(sql, [tdn], (err, result) => {
-        if (err) {
-            console.error("Lỗi xóa tài khoản:", err);
-            return res.status(500).json({ error: "Lỗi server" });
-        }
-
-        if (result.affectedRows === 0) {
-            return res.status(404).json({ message: "Không tìm thấy tài khoản" });
-        }
-
-        res.json({ message: "Xóa tài khoản thành công" });
-    });
-});
-router.put('/:tdn', (req, res) => {
-    const oldTdn = req.params.tdn;
-    const { quyen } = req.body;
-
-    const sql = "UPDATE taikhoan SET quyen = ? WHERE tendn = ?";
-    db.query(sql, [ quyen, oldTdn], (err, result) => {
-        if (err) {
-            console.error("Lỗi cập nhật tài khoản:", err);
-            return res.status(500).json({ error: "Lỗi server" });
-        }
-
-        if (result.affectedRows === 0) {
-            return res.status(404).json({ message: "Không tìm thấy tài khoản" });
-        }
-
-        res.json({ message: "Cập nhật tài khoản thành công" });
-    });
-});
-router.post("/", async (req, res) => {
+// --- 5. CÁC API QUẢN TRỊ (Mã hóa mật khẩu khi add/update) ---
+router.post("/add", verifyToken, isAdmin, async (req, res) => {
+  try {
     const { tendn, matkhau, quyen } = req.body;
-    const hashedPassword = await bcrypt.hash(matkhau, saltRounds);
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(matkhau, salt);
 
-    const sql = "INSERT INTO taikhoan (tendn, matkhau, quyen) VALUES (?, ?, ?)";
-    db.query(sql, [tendn, hashedPassword, quyen], (err, result) => {
-        if (err) {
-            console.error("Lỗi thêm tài khoản:", err);
-            return res.status(500).json({ error: "Lỗi server" });
-        }
-        res.json({ success: true, message: "Thêm tài khoản thành công!" });
-    });
+    const newUser = new TaiKhoan({ tendn, matkhau: hashedPassword, quyen });
+    await newUser.save();
+    res.status(201).json({ success: true, message: "Thêm thành công" });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Lỗi hệ thống" });
+  }
 });
-router.get('/thongtin', (req, res) => {
-    const id = req.query.id;
-    if (!id) {
-        return res.status(400).json({ success: false, message: 'Thiếu tên đăng nhập' });
+
+router.put("/update/:id", verifyToken, isAdmin, async (req, res) => {
+  try {
+    const { quyen, password } = req.body;
+    let updateData = { quyen: quyen };
+
+    if (password) {
+      const salt = await bcrypt.genSalt(10);
+      updateData.matkhau = await bcrypt.hash(password, salt);
     }
 
-    const sql = "SELECT tendn, hoten, email, sdt, diachi, quyen, ngaytao FROM taikhoan WHERE id = ?";
-    db.query(sql, [id], (err, results) => {
-        if (err) return res.status(500).json({ success: false, message: 'Lỗi truy vấn' });
-        if (results.length === 0) return res.status(404).json({ success: false, message: 'Không tìm thấy tài khoản' });
-        return res.json({ success: true, user: results[0] });
+    const user = await TaiKhoan.findByIdAndUpdate(req.params.id, updateData, {
+      new: true,
     });
+    res.json({ success: true, data: user });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
 });
-router.post('/doimatkhau', (req, res) => {
-    const { id, matkhau_cu, matkhau_moi } = req.body;
-    if (!id || !matkhau_cu || !matkhau_moi) {
-        return res.json({ success: false, message: 'Thiếu thông tin' });
-    }
 
-    const sqlCheck = "SELECT matkhau FROM taikhoan WHERE id = ?";
-    db.query(sqlCheck, [id], async (err, results) => {
-        if (err || results.length === 0) {
-            return res.json({ success: false, message: 'Không tìm thấy tài khoản' });
-        }
-
-        const mkHienTai = results[0].matkhau;
-        const match = await bcrypt.compare(matkhau_cu, mkHienTai);
-        if (!match) {
-            return res.json({ success: false, message: 'Mật khẩu cũ không đúng' });
-        }
-
-        const hashedNewPass = await bcrypt.hash(matkhau_moi, saltRounds);
-        const sqlUpdate = "UPDATE taikhoan SET matkhau = ? WHERE id = ?";
-        db.query(sqlUpdate, [hashedNewPass, id], (err2) => {
-            if (err2) return res.json({ success: false, message: 'Lỗi cập nhật' });
-            return res.json({ success: true });
-        });
-    });
+router.delete("/delete/:id", verifyToken, isAdmin, async (req, res) => {
+  try {
+    await TaiKhoan.findByIdAndDelete(req.params.id);
+    res.json({ success: true, message: "Xóa thành công" });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
-router.post('/capnhat', (req, res) => {
-    const { id, hoten, email, sdt, diachi } = req.body;
-    if (!id) return res.json({ success: false, message: 'Thiếu ID người dùng' });
 
-    const sql = "UPDATE taikhoan SET hoten = ?, email = ?, sdt = ?, diachi = ? WHERE id = ?";
-    db.query(sql, [hoten, email, sdt, diachi, id], (err) => {
-        if (err) return res.json({ success: false, message: 'Lỗi cập nhật CSDL' });
-        return res.json({ success: true, message: 'Cập nhật thành công' });
-    });
-});
-router.post('/khoataikhoan', (req, res) => {
-    const { id, newStatus } = req.body;
-    const sql = "UPDATE taikhoan SET trangthai = ? WHERE id = ?";
-    db.query(sql, [newStatus, id], (err, result) => {
-        if (err) return res.status(500).json({ success: false, message: "Lỗi server" });
-        if (result.affectedRows === 0) return res.status(404).json({ success: false, message: "Không tìm thấy tài khoản" });
-        res.json({ success: true, message: "Cập nhật trạng thái thành công" });
-    });
-});
 module.exports = router;

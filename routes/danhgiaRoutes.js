@@ -1,90 +1,55 @@
-const express = require('express');
+//danhgiaRoutes.js
+const express = require("express");
 const router = express.Router();
-const db = require('../db'); // Kết nối MySQL
-router.get("/check", (req, res) => {
-    const { user_id, masp, id_chitietdonhang } = req.query;
+const mongoose = require("mongoose");
 
-    const sql = `
-        SELECT 1 FROM danhgia 
-        WHERE user_id = ? AND masp = ? AND id_chitietdonhang = ?
-        LIMIT 1
-    `;
-
-    db.query(sql, [user_id, masp, id_chitietdonhang], (err, result) => {
-        if (err) {
-            console.error("Lỗi khi kiểm tra đánh giá:", err);
-            return res.status(500).json({ success: false, error: "Lỗi server" });
-        }
-
-        if (result.length > 0) {
-            res.json({ success: true, exists: true });
-        } else {
-            res.json({ success: true, exists: false });
-        }
-    });
+const DanhGiaSchema = new mongoose.Schema({
+  tendn: String, // Tên đăng nhập người dùng
+  masp: String,
+  diem: Number, // Số sao (rating)
+  noidung: String, // Nội dung review
+  ngay: { type: Date, default: Date.now },
 });
-router.post("/", (req, res) => {
-    const { user_id, masp, id_chitietdonhang, rating, comment, ngay } = req.body;
 
-    const sql = `
-        INSERT INTO danhgia (user_id, masp, id_chitietdonhang, rating, comment, ngay_danhgia	)
-        VALUES (?, ?, ?, ?, ?, ?)
-    `;
+const DanhGia =
+  mongoose.models.DanhGia || mongoose.model("DanhGia", DanhGiaSchema);
 
-    db.query(sql, [user_id, masp, id_chitietdonhang, rating, comment, ngay], (err, result) => {
-        if (err) {
-            console.error("Lỗi thêm đánh giá:", err);
-            return res.status(500).json({ success: false, message: "Lỗi server" });
-        }
-
-        res.json({ success: true, message: "Thêm đánh giá thành công" });
-    });
+// --- API MỚI: Thêm đánh giá (Dùng cho WriteReview_Activity) ---
+router.post("/add", async (req, res) => {
+  try {
+    const newReview = new DanhGia(req.body);
+    await newReview.save();
+    res.status(201).json({ success: true, message: "Success" });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
-// xem đánh giá 
-router.get("/lay", (req, res) => {
-    const { user_id, masp, id_chitietdonhang } = req.query;
 
-    const sql = `
-        SELECT * FROM danhgia 
-        WHERE id_chitietdonhang = ?
-    `;
-
-    db.query(sql, [id_chitietdonhang], (err, result) => {
-        if (err) {
-            console.error("Lỗi lấy đánh giá:", err);
-            return res.status(500).json({ success: false, message: "Lỗi server" });
-        }
-
-        if (result.length > 0) {
-            res.json({ success: true, data: result[0] });
-        } else {
-            res.json({ success: false, message: "Chưa có đánh giá" });
-        }
+// --- API CŨ: Lấy đánh giá của một sản phẩm (Dùng cho ChiTietSanPham_Activity) ---
+router.get("/sanpham/:masp", async (req, res) => {
+  try {
+    const results = await DanhGia.find({ masp: req.params.masp }).sort({
+      ngay: -1,
     });
+    res.json({ success: true, data: results });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
-// GET /danhgia/sanpham/:masp - Lấy tất cả đánh giá theo mã sản phẩm
-router.get('/sanpham/:masp', (req, res) => {
-    const masp = req.params.masp;
-    const sql = 'SELECT * FROM danhgia WHERE masp = ? ORDER BY ngay_danhgia DESC';
 
-    db.query(sql, [masp], (err, results) => {
-        if (err) return res.status(500).json({ success: false, error: err.message });
-        res.json({ success: true, data: results });
-    });
-});
-router.get('/trungbinh', (req, res) => {
-    const masp = req.query.masp;
-    if (!masp) {
-        return res.status(400).json({ success: false, message: "Thiếu mã sản phẩm" });
-    }
-
-    const sql = "SELECT AVG(rating) AS avgRating FROM danhgia WHERE masp = ?";
-    db.query(sql, [masp], (err, result) => {
-        if (err) return res.status(500).json({ success: false, error: err });
-
-        const avg = result[0].avgRating || 0;
-        res.json({ success: true, avgRating: avg });
-    });
+// --- API CŨ: Tính điểm trung bình ---
+router.get("/trungbinh", async (req, res) => {
+  const masp = req.query.masp;
+  try {
+    const stats = await DanhGia.aggregate([
+      { $match: { masp: masp } },
+      { $group: { _id: "$masp", avgRating: { $avg: "$diem" } } },
+    ]);
+    const avg = stats.length > 0 ? stats[0].avgRating : 0;
+    res.json({ success: true, avgRating: parseFloat(avg.toFixed(1)) });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 module.exports = router;

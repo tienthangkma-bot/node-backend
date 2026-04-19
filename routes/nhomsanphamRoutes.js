@@ -1,118 +1,77 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const db = require('../db'); // Kết nối MySQL
-// POST /nhomsanpham
-router.post("/", (req, res) => {
-  const { tennsp, anh } = req.body;
-  if (!tennsp || !anh) {
-    return res.status(400).json({ error: "Thiếu dữ liệu" });
+const mongoose = require("mongoose");
+const { verifyToken, isAdmin } = require("../middleware/auth");
+
+// 1. Định nghĩa Schema cho Nhóm Sản Phẩm
+const NhomSPSchema = new mongoose.Schema(
+  {
+    tennsp: { type: String, required: true },
+    anh: { type: String, required: true },
+  },
+  { collection: "nhomsanpham", timestamps: true }
+);
+
+// 2. 🛡️ KHỞI TẠO MODEL AN TOÀN (Sửa lỗi định nghĩa sai tên biến)
+const NhomSP =
+  mongoose.models.NhomSanPham || mongoose.model("NhomSanPham", NhomSPSchema);
+
+// --- CÔNG KHAI (Không cần Token để Android load trang chủ) ---
+
+// Route: /nhomsanpham/random
+router.get("/random", async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 8;
+    // Sử dụng đúng biến NhomSP đã khai báo ở trên
+    const results = await NhomSP.aggregate([{ $sample: { size: limit } }]);
+    res.json(results);
+  } catch (err) {
+    console.error("Lỗi lấy random nhóm SP:", err);
+    res.status(500).json({ success: false, message: "Lỗi Server" });
   }
-
-  const imageBuffer = Buffer.from(anh, "base64");
-  const sql = "INSERT INTO nhomsanpham (tennsp, anh) VALUES (?, ?)";
-
-  db.query(sql, [tennsp, imageBuffer], (err, result) => {
-    if (err) {
-      console.error("Lỗi thêm nhóm sản phẩm:", err);
-      return res.status(500).json({ error: "Lỗi server" });
-    }
-    res.json({ success: true });
-  });
 });
-// Lấy tất cả nhóm sản phẩm
-router.get('/all', (req, res) => {
-    db.query('SELECT * FROM nhomsanpham', (err, results) => {
-        if (err) {
-            console.error(err);
-            return res.status(500).json({ message: 'Lỗi máy chủ' });
-        }
 
-        const result = results.map(row => ({
-            maso: row.maso,
-            tennsp: row.tennsp,
-            anh: row.anh ? Buffer.from(row.anh).toString('base64') : null
-        }));
-
-        res.json(result);
-    });
+// Route: /nhomsanpham/
+router.get("/", async (req, res) => {
+  try {
+    const results = await NhomSP.find().sort({ createdAt: -1 });
+    res.json(results);
+  } catch (err) {
+    res.status(500).json({ success: false });
+  }
 });
-router.get("/random", (req, res) => {
-  const limit = parseInt(req.query.limit) || 8;
-  const sql = "SELECT * FROM nhomsanpham ORDER BY RANDOM() LIMIT ?";
 
-  db.query(sql, [limit], (err, results) => {
-    if (err) {
-      console.error("Lỗi khi truy vấn nhóm sản phẩm:", err);
-      return res.status(500).json({ error: "Lỗi server" });
-    }
+// --- BẢO MẬT (Chỉ Admin mới được thao tác) ---
 
-    const encoded = results.map(item => ({
-      ...item,
-      anh: item.anh ? Buffer.from(item.anh).toString("base64") : null
-    }));
-
-    res.json(encoded);
-  });
+// Route: /nhomsanpham/add
+router.post("/add", verifyToken, isAdmin, async (req, res) => {
+  try {
+    const newNSP = new NhomSP(req.body);
+    await newNSP.save();
+    res.status(201).json({ success: true, message: "Thêm thành công" });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
-router.get("/", (req, res) => {
-  const sql = "SELECT * FROM nhomsanpham";
-  db.query(sql, (err, results) => {
-    if (err) {
-      console.error("Lỗi khi truy vấn nhóm sản phẩm:", err);
-      return res.status(500).json({ error: "Lỗi server" });
-    }
-    res.json(results); // <-- Trả dữ liệu JSON về client
-  });
+
+// Route: /nhomsanpham/update/:id
+router.put("/update/:id", verifyToken, isAdmin, async (req, res) => {
+  try {
+    await NhomSP.findByIdAndUpdate(req.params.id, req.body);
+    res.json({ success: true, message: "Cập nhật thành công" });
+  } catch (err) {
+    res.status(500).json({ success: false });
+  }
 });
-// XÓA SẢN PHẨM
-router.delete("/:maso", (req, res) => {
-  const maso = req.params.maso;
 
-  // Kiểm tra sản phẩm còn tham chiếu
-  const checkSql = "SELECT COUNT(*) AS count FROM sanpham WHERE maso = ?";
-  db.query(checkSql, [maso], (err, results) => {
-    if (err) return res.status(500).json({ error: "Lỗi truy vấn" });
-
-    if (results[0].count > 0) {
-      return res.status(400).json({ error: "Không thể xóa. Vẫn còn sản phẩm thuộc nhóm này." });
-    }
-
-    // Nếu không có sản phẩm, cho phép xóa
-    const deleteSql = "DELETE FROM nhomsanpham WHERE maso = ?";
-    db.query(deleteSql, [maso], (err2, result) => {
-      if (err2) return res.status(500).json({ error: "Lỗi khi xóa nhóm" });
-      res.json({ message: "Đã xóa nhóm sản phẩm thành công" });
-    });
-  });
+// Route: /nhomsanpham/delete/:id
+router.delete("/delete/:id", verifyToken, isAdmin, async (req, res) => {
+  try {
+    await NhomSP.findByIdAndDelete(req.params.id);
+    res.json({ success: true, message: "Xóa thành công" });
+  } catch (err) {
+    res.status(500).json({ success: false });
+  }
 });
-//  sửa nhóm sản phẩm 
-router.put("/:maso", (req, res) => {
-    const maso = req.params.maso;
-    const { tennsp, anh } = req.body;
 
-    // Cấu trúc SQL động: nếu có ảnh thì thêm cập nhật cột ảnh
-    let sql = "UPDATE nhomsanpham SET tennsp = ?";
-    const values = [tennsp];
-
-    if (anh && anh.trim() !== "") {
-        sql += ", anh = ?";
-        values.push(Buffer.from(anh, 'base64'));
-    }
-
-    sql += " WHERE maso = ?";
-    values.push(maso);
-
-    db.query(sql, values, (err, result) => {
-        if (err) {
-            console.error("Lỗi cập nhật:", err);
-            return res.status(500).json({ error: "Lỗi server" });
-        }
-
-        if (result.affectedRows === 0) {
-            return res.status(404).json({ message: "Không tìm thấy nhóm sản phẩm" });
-        }
-
-        res.json({ message: "Cập nhật nhóm sản phẩm thành công" });
-    });
-});
 module.exports = router;

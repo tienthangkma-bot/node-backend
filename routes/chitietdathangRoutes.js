@@ -1,51 +1,41 @@
-const express = require('express');
+//chitietdathangRoutes.js
+const express = require("express");
 const router = express.Router();
-const db = require('../db'); // Kết nối MySQL
+const mongoose = require("mongoose");
 
-router.post("/", (req, res) => {
-  const { id_dathang, masp, soluong, dongia, anh } = req.body;
-
-  // 🧩 Nếu FE gửi Base64 ảnh, decode về Buffer
-  const anhBuffer = anh ? Buffer.from(anh, "base64") : null;
-
-  const sql = `
-    INSERT INTO chitietdonhang (id_dathang, masp, soluong, dongia, anh)
-    VALUES ($1, $2, $3, $4, $5)
-  `;
-
-  db.query(sql, [id_dathang, masp, soluong, dongia, anhBuffer], (err) => {
-    if (err) {
-      console.error("❌ Lỗi khi thêm chi tiết:", err);
-      return res.status(500).json({ message: "Lỗi server" });
-    }
-    res.json({ message: "✅ Thêm chi tiết thành công" });
-  });
+// Định nghĩa cấu trúc Chi tiết đơn hàng
+const ChiTietSchema = new mongoose.Schema({
+  id_dathang: { type: String, required: true }, // ID từ bảng DatHang
+  masp: String,
+  tensp: String,
+  soluong: Number,
+  dongia: Number,
+  anh: String, // Lưu link ảnh (URL String)
 });
 
-router.get("/:id", (req, res) => {
-  const id = req.params.id;
-  const sql = `
-    SELECT id_chitiet, masp, soluong, dongia, anh
-    FROM chitietdonhang
-    WHERE id_dathang = $1
-  `;
+const ChiTiet =
+  mongoose.models.ChiTietDonHang ||
+  mongoose.model("ChiTietDonHang", ChiTietSchema);
 
-  db.query(sql, [id], (err, results) => {
-    if (err) {
-      console.error("❌ Lỗi khi truy vấn chi tiết:", err);
-      return res.status(500).json({ message: "Lỗi server" });
-    }
+// API thêm chi tiết đơn hàng (Dùng khi Checkout trên Android)
+router.post("/", async (req, res) => {
+  try {
+    const newDetail = new ChiTiet(req.body);
+    await newDetail.save();
+    res.json({ success: true, message: "✅ Thêm chi tiết thành công" });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
-    const rows = results.rows || results;
-
-    // 🔥 Chuyển buffer → base64 string trước khi gửi
-    const encoded = rows.map(item => ({
-      ...item,
-      anh: item.anh ? Buffer.from(item.anh).toString("base64") : null
-    }));
-
-    res.json(encoded);
-  });
+// API lấy chi tiết theo ID đơn hàng (Dùng cho trang ChiTietDonHang_Admin)
+router.get("/:id", async (req, res) => {
+  try {
+    const results = await ChiTiet.find({ id_dathang: req.params.id });
+    res.json(results);
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
 });
 
 module.exports = router;
