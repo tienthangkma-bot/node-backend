@@ -15,7 +15,7 @@ const ChiTietSchema = new mongoose.Schema({
 
 const ChiTiet =
   mongoose.models.ChiTietDonHang ||
-  mongoose.model("ChiTietDonHang", ChiTietSchema);
+  mongoose.model("ChiTietDonHang", ChiTietSchema); //nếu model có rồi dùng lại không thì tạo mới
 
 // API thêm chi tiết đơn hàng (Dùng khi Checkout trên Android)
 router.post("/", async (req, res) => {
